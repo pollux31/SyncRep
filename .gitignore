@@ -1,0 +1,14 @@
+# Fichiers de configuration Obsidian
+data.json
+
+# Dépendances
+node_modules/
+
+# Fichiers de build
+main.js
+*.js.map
+
+# Fichiers temporaires
+.DS_Store
+.tmp
+*.log

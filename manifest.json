@@ -1,0 +1,10 @@
+{
+	"id": "syncrep",
+	"name": "SyncRep",
+	"version": "1.0.1",
+	"minAppVersion": "0.15.0",
+	"description": "Synchronise les notes Obsidian avec un répertoire sur disque",
+	"author": "Thierry NICOT",
+	"authorUrl": "",
+	"isDesktopOnly": true
+}
