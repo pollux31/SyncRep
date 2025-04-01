@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS: SyncRepSettings = {
     excludedFolders: [],
     includedFolders: [],
     externalIncludedFolders: [],
-    syncMode: 'all',
+    syncMode: 'include',
     debugMode: false,
     highlightColor: '#50fa7b' // Couleur par défaut (vert)
 };
@@ -30,6 +30,7 @@ export const DEFAULT_SETTINGS: SyncRepSettings = {
 export class SyncRepSettingTab extends PluginSettingTab {
     plugin: SyncRepPlugin;
     folderListEl: HTMLElement;
+    folderDropdownContainer: HTMLElement;
 
     constructor(app: App, plugin: SyncRepPlugin) {
         super(app, plugin);
@@ -139,6 +140,9 @@ export class SyncRepSettingTab extends PluginSettingTab {
     refreshFolderDropdown(containerEl: HTMLElement) {
         const plugin = this.plugin as SyncRepPlugin;
         
+        // Vider le conteneur existant
+        containerEl.empty();
+        
         // Créer un conteneur pour la sélection de dossier
         const folderSelectionContainer = containerEl.createDiv({ cls: 'sync-rep-folder-selection' });
         folderSelectionContainer.style.display = 'flex';
@@ -176,9 +180,11 @@ export class SyncRepSettingTab extends PluginSettingTab {
             try {
                 // Lire les répertoires dans le dossier de synchronisation
                 const entries = fs.readdirSync(plugin.settings.syncFolderPath, { withFileTypes: true });
+                let hasRemoteFolders = false;
                 
                 for (const entry of entries) {
                     if (entry.isDirectory()) {
+                        hasRemoteFolders = true;
                         // Construire le chemin complet
                         const fullPath = path.join(plugin.settings.syncFolderPath, entry.name);
                         
@@ -187,14 +193,50 @@ export class SyncRepSettingTab extends PluginSettingTab {
                             (externalPath: string) => externalPath === fullPath
                         );
                         
+                        // Vérifier si ce dossier est déjà inclus dans les dossiers du vault
+                        const isAlreadyIncluded = plugin.settings.includedFolders.includes(entry.name);
+                        
+                        // Afficher le statut du dossier
+                        let displayText = entry.name;
+                        if (isAlreadyIncluded) {
+                            displayText += ' (déjà synchronisé)';
+                        }
+                        
                         // Si ce n'est pas déjà un répertoire externe, l'ajouter à la liste
                         if (!isAlreadyExternal) {
-                            remoteGroup.createEl('option', { text: entry.name }).value = fullPath;
+                            const option = remoteGroup.createEl('option', { text: displayText });
+                            option.value = fullPath;
+                            
+                            // Désactiver l'option si le dossier est déjà inclus
+                            if (isAlreadyIncluded) {
+                                option.disabled = true;
+                            }
                         }
                     }
                 }
+                
+                // Si aucun répertoire distant n'a été trouvé, ajouter un message
+                if (!hasRemoteFolders) {
+                    remoteGroup.createEl('option', { 
+                        text: 'Aucun répertoire trouvé dans le dossier distant' 
+                    }).disabled = true;
+                }
             } catch (error) {
                 console.error(`Erreur lors de la lecture des répertoires dans ${plugin.settings.syncFolderPath}:`, error);
+                remoteGroup.createEl('option', { 
+                    text: `Erreur: ${error.message}` 
+                }).disabled = true;
+            }
+        } else {
+            // Si le chemin n'est pas défini ou n'existe pas
+            if (!plugin.settings.syncFolderPath) {
+                remoteGroup.createEl('option', { 
+                    text: 'Veuillez d\'abord configurer le chemin du répertoire distant' 
+                }).disabled = true;
+            } else {
+                remoteGroup.createEl('option', { 
+                    text: `Le répertoire ${plugin.settings.syncFolderPath} n'existe pas` 
+                }).disabled = true;
             }
         }
         
@@ -255,56 +297,35 @@ export class SyncRepSettingTab extends PluginSettingTab {
                     await plugin.saveSettings();
                 }
                 
-                // Rafraîchir l'interface complète
-                this.display();
+                // Rafraîchir l'interface
+                this.refreshFolderList();
+                this.refreshFolderDropdown(containerEl);
                 
                 // Mettre à jour l'affichage des dossiers synchronisés dans l'explorateur
                 plugin.highlightSyncedFolders();
-                
-                new Notice(`Dossier distant ajouté et synchronisé: ${folderName}`);
             } else {
-                // C'est un dossier du vault, ajouter normalement
+                // C'est un dossier du vault
+                
+                // Vérifier si ce dossier est déjà inclus
                 if (plugin.settings.includedFolders.includes(selectedValue)) {
                     new Notice(`Le dossier ${selectedValue} est déjà inclus dans la synchronisation`);
                     return;
                 }
                 
+                // Ajouter à la liste des dossiers inclus
                 plugin.settings.includedFolders.push(selectedValue);
+                
+                // Sauvegarder les paramètres
                 await plugin.saveSettings();
                 
-                // Synchroniser immédiatement le dossier
-                try {
-                    // Récupérer tous les fichiers du dossier dans le vault
-                    const folder = this.app.vault.getAbstractFileByPath(selectedValue);
-                    if (folder && folder instanceof TFolder) {
-                        // Récupérer tous les fichiers du dossier de manière récursive
-                        const files = this.getAllFilesInFolder(folder);
-                        
-                        // Synchroniser chaque fichier
-                        for (const file of files) {
-                            if (file instanceof TFile) {
-                                await plugin.fileSync.syncFile(file);
-                            }
-                        }
-                        
-                        // Déclencher également une synchronisation complète pour s'assurer que
-                        // les fichiers sont bien copiés dans le répertoire distant
-                        await plugin.syncAllFiles();
-                        
-                        // Mettre à jour l'affichage des dossiers synchronisés dans l'explorateur
-                        plugin.highlightSyncedFolders();
-                        
-                        new Notice(`Dossier ajouté et synchronisé: ${selectedValue}`);
-                    } else {
-                        new Notice(`Dossier ajouté: ${selectedValue}`);
-                    }
-                } catch (error) {
-                    console.error(`Erreur lors de la synchronisation du dossier ${selectedValue}:`, error);
-                    new Notice(`Dossier ajouté, mais erreur lors de la synchronisation: ${error.message}`);
-                }
+                // Rafraîchir l'interface
+                this.refreshFolderList();
+                this.refreshFolderDropdown(containerEl);
                 
-                // Rafraîchir l'interface complète
-                this.display();
+                // Mettre à jour l'affichage des dossiers synchronisés dans l'explorateur
+                plugin.highlightSyncedFolders();
+                
+                new Notice(`Dossier ${selectedValue} ajouté à la synchronisation`);
             }
         });
         
@@ -313,31 +334,41 @@ export class SyncRepSettingTab extends PluginSettingTab {
 
     display(): void {
         const { containerEl } = this;
-        const plugin = this.plugin as SyncRepPlugin;
-
         containerEl.empty();
 
         containerEl.createEl('h2', { text: 'Paramètres de SyncRep' });
 
+        // Chemin du répertoire de synchronisation
         new Setting(containerEl)
             .setName('Chemin du répertoire de synchronisation')
-            .setDesc('Chemin absolu vers le répertoire où les notes seront synchronisées')
-            .addText(text => text
-                .setPlaceholder('C:\\Chemin\\vers\\répertoire')
-                .setValue(plugin.settings.syncFolderPath)
-                .onChange(async (value) => {
-                    plugin.settings.syncFolderPath = value;
-                    await plugin.saveSettings();
-                }));
+            .setDesc('Chemin absolu vers le répertoire où vos notes seront synchronisées')
+            .addText(text => {
+                text.setPlaceholder('Chemin du répertoire')
+                    .setValue(this.plugin.settings.syncFolderPath)
+                    .onChange(async (value) => {
+                        // Sauvegarder la valeur mais ne pas rafraîchir l'interface
+                        this.plugin.settings.syncFolderPath = value;
+                        await this.plugin.saveSettings();
+                    });
+                
+                // Ajouter un gestionnaire d'événement pour la perte de focus
+                const inputEl = text.inputEl;
+                inputEl.addEventListener('blur', () => {
+                    // Rafraîchir l'interface complète à la perte du focus
+                    this.display();
+                });
+                
+                return text;
+            });
 
         new Setting(containerEl)
             .setName('Synchroniser lors de la sauvegarde')
             .setDesc('Synchroniser automatiquement les notes lorsqu\'elles sont sauvegardées')
             .addToggle(toggle => toggle
-                .setValue(plugin.settings.syncOnSave)
+                .setValue(this.plugin.settings.syncOnSave)
                 .onChange(async (value) => {
-                    plugin.settings.syncOnSave = value;
-                    await plugin.saveSettings();
+                    this.plugin.settings.syncOnSave = value;
+                    await this.plugin.saveSettings();
                 }));
 
         new Setting(containerEl)
@@ -345,16 +376,16 @@ export class SyncRepSettingTab extends PluginSettingTab {
             .setDesc('Intervalle en secondes pour la synchronisation automatique (0 pour désactiver)')
             .addText(text => text
                 .setPlaceholder('0')
-                .setValue(String(plugin.settings.syncInterval))
+                .setValue(String(this.plugin.settings.syncInterval))
                 .onChange(async (value) => {
                     // Convertir la valeur en nombre
                     const numValue = parseInt(value, 10);
                     
                     // Vérifier si la valeur est un nombre valide
                     if (!isNaN(numValue) && numValue >= 0) {
-                        plugin.settings.syncInterval = numValue;
-                        await plugin.saveSettings();
-                        plugin.restartSyncInterval();
+                        this.plugin.settings.syncInterval = numValue;
+                        await this.plugin.saveSettings();
+                        this.plugin.restartSyncInterval();
                     }
                 }));
 
@@ -363,10 +394,10 @@ export class SyncRepSettingTab extends PluginSettingTab {
             .setName('Mode débogage')
             .setDesc('Activer les notifications et les logs détaillés')
             .addToggle(toggle => toggle
-                .setValue(plugin.settings.debugMode)
+                .setValue(this.plugin.settings.debugMode)
                 .onChange(async (value) => {
-                    plugin.settings.debugMode = value;
-                    await plugin.saveSettings();
+                    this.plugin.settings.debugMode = value;
+                    await this.plugin.saveSettings();
                 }));
 
         // Mode de synchronisation
@@ -376,24 +407,24 @@ export class SyncRepSettingTab extends PluginSettingTab {
             .addDropdown(dropdown => dropdown
                 .addOption('all', 'Tous les fichiers (sauf exclusions)')
                 .addOption('include', 'Uniquement les dossiers inclus')
-                .setValue(plugin.settings.syncMode)
+                .setValue(this.plugin.settings.syncMode)
                 .onChange(async (value) => {
-                    plugin.settings.syncMode = value as 'all' | 'include';
-                    await plugin.saveSettings();
+                    this.plugin.settings.syncMode = value as 'all' | 'include';
+                    await this.plugin.saveSettings();
                     
                     // Rafraîchir l'interface pour afficher/masquer les options pertinentes
                     this.display();
                     
                     // Si on passe en mode "include" et qu'aucun dossier n'est inclus,
                     // afficher une notification pour guider l'utilisateur
-                    if (value === 'include' && plugin.settings.includedFolders.length === 0) {
+                    if (value === 'include' && this.plugin.settings.includedFolders.length === 0) {
                         new Notice('Veuillez sélectionner au moins un dossier à inclure dans la synchronisation');
                     }
                 })
             );
 
         // Dossiers à inclure (visible uniquement si le mode est 'include')
-        if (plugin.settings.syncMode === 'include') {
+        if (this.plugin.settings.syncMode === 'include') {
             // Section pour les dossiers inclus
             containerEl.createEl('h3', { text: 'Dossiers inclus dans la synchronisation' });
             
@@ -405,7 +436,8 @@ export class SyncRepSettingTab extends PluginSettingTab {
             this.refreshFolderList();
             
             // Ajouter un nouveau dossier
-            const folderSelectionContainer = this.refreshFolderDropdown(containerEl);
+            this.folderDropdownContainer = containerEl.createDiv();
+            const folderSelectionContainer = this.refreshFolderDropdown(this.folderDropdownContainer);
         }
 
         // Dossiers externes à inclure
@@ -455,12 +487,12 @@ export class SyncRepSettingTab extends PluginSettingTab {
         });
             
         // Afficher la liste des dossiers externes
-        if (plugin.settings.externalIncludedFolders.length > 0) {
+        if (this.plugin.settings.externalIncludedFolders.length > 0) {
             containerEl.createEl('h3', { text: 'Dossiers externes configurés' });
             
             const externalFolderListEl = containerEl.createDiv({ cls: 'sync-rep-folder-list' });
             
-            for (const externalFolder of plugin.settings.externalIncludedFolders) {
+            for (const externalFolder of this.plugin.settings.externalIncludedFolders) {
                 const itemEl = externalFolderListEl.createDiv({ cls: 'sync-rep-folder-item' });
                 
                 // Ajouter du style CSS
@@ -489,17 +521,17 @@ export class SyncRepSettingTab extends PluginSettingTab {
                 
                 // Gérer la suppression du dossier externe
                 removeButton.addEventListener('click', async () => {
-                    const index = plugin.settings.externalIncludedFolders.indexOf(externalFolder);
+                    const index = this.plugin.settings.externalIncludedFolders.indexOf(externalFolder);
                     
                     if (index > -1) {
                         // Supprimer de la liste des dossiers externes
-                        plugin.settings.externalIncludedFolders.splice(index, 1);
+                        this.plugin.settings.externalIncludedFolders.splice(index, 1);
                         
                         // Sauvegarder les paramètres
-                        await plugin.saveSettings();
+                        await this.plugin.saveSettings();
                         
                         // Mettre à jour l'affichage des dossiers synchronisés dans l'explorateur
-                        plugin.highlightSyncedFolders();
+                        this.plugin.highlightSyncedFolders();
                         
                         // Rafraîchir l'interface complète
                         this.display();
@@ -521,10 +553,10 @@ export class SyncRepSettingTab extends PluginSettingTab {
             .setDesc('Liste des dossiers à exclure de la synchronisation (séparés par des virgules)')
             .addTextArea(text => text
                 .setPlaceholder('dossier1, dossier2, dossier3')
-                .setValue(plugin.settings.excludedFolders.join(', '))
+                .setValue(this.plugin.settings.excludedFolders.join(', '))
                 .onChange(async (value) => {
-                    plugin.settings.excludedFolders = value.split(',').map(folder => folder.trim()).filter(folder => folder.length > 0);
-                    await plugin.saveSettings();
+                    this.plugin.settings.excludedFolders = value.split(',').map(folder => folder.trim()).filter(folder => folder.length > 0);
+                    await this.plugin.saveSettings();
                 }));
 
         // Couleur de mise en évidence
@@ -532,10 +564,14 @@ export class SyncRepSettingTab extends PluginSettingTab {
             .setName('Couleur de mise en évidence')
             .setDesc('Couleur utilisée pour mettre en évidence les dossiers synchronisés')
             .addColorPicker(colorPicker => colorPicker
-                .setValue(plugin.settings.highlightColor)
+                .setValue(this.plugin.settings.highlightColor)
                 .onChange(async (value) => {
-                    plugin.settings.highlightColor = value;
-                    await plugin.saveSettings();
+                    this.plugin.settings.highlightColor = value;
+                    await this.plugin.saveSettings();
+                    
+                    // Mettre à jour les styles et rafraîchir l'affichage des dossiers synchronisés
+                    this.plugin.updateStyles();
+                    this.plugin.highlightSyncedFolders();
                 }));
     }
 

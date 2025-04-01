@@ -333,6 +333,9 @@ export default class SyncRepPlugin extends Plugin {
 			return;
 		}
 
+		// S'assurer que les styles sont à jour
+		this.updateStyles();
+
 		// Pour chaque explorateur de fichiers trouvé
 		for (const fileExplorer of fileExplorers) {
 			// Récupérer tous les éléments de dossier
@@ -374,10 +377,8 @@ export default class SyncRepPlugin extends Plugin {
 						if (isIncluded || isExternalFolder) {
 							folderEl.classList.add('syncrep-synced');
 							
-							// Appliquer directement le style en gras au contenu du titre
-							if (titleEl) {
-								(titleEl as HTMLElement).style.fontWeight = 'bold';
-							}
+							// Nous n'appliquons plus le style directement ici,
+							// car il sera appliqué via CSS dans updateStyles()
 							
 							this.debugLog(`Dossier mis en évidence: ${folderPath}`);
 						}
@@ -399,12 +400,18 @@ export default class SyncRepPlugin extends Plugin {
 	updateStyleContent(styleEl: HTMLStyleElement) {
 		styleEl.textContent = `
 			.nav-folder.syncrep-synced > .nav-folder-title {
-				color: ${this.settings.highlightColor};
+				color: ${this.settings.highlightColor} !important;
 			}
 			.nav-folder.syncrep-synced > .nav-folder-title .nav-folder-title-content {
-				font-weight: bold;
+				font-weight: bold !important;
+			}
+			.theme-dark .nav-folder.syncrep-synced > .nav-folder-title:hover,
+			.theme-light .nav-folder.syncrep-synced > .nav-folder-title:hover {
+				color: ${this.settings.highlightColor} !important;
 			}
 		`;
+		
+		this.debugLog(`Styles mis à jour avec la couleur: ${this.settings.highlightColor}`);
 	}
 	
 	// Mettre à jour les styles existants
