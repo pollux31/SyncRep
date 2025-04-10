@@ -93,6 +93,11 @@ export default class SyncRepPlugin extends Plugin {
 		// Appliquer les styles initiaux
 		setTimeout(() => {
 			this.highlightSyncedFolders();
+			
+			// Faire plusieurs tentatives pour s'assurer que les styles sont appliqués
+			// même si l'explorateur de fichiers n'est pas complètement chargé
+			setTimeout(() => this.highlightSyncedFolders(), 2000);
+			setTimeout(() => this.highlightSyncedFolders(), 5000);
 		}, 1000);
 
 		// Notification de chargement du plugin
@@ -147,6 +152,9 @@ export default class SyncRepPlugin extends Plugin {
 		
 		// Mettre à jour l'affichage des dossiers synchronisés
 		this.highlightSyncedFolders();
+		
+		// Faire une tentative supplémentaire après un court délai
+		setTimeout(() => this.highlightSyncedFolders(), 1000);
 	}
 
 	restartSyncInterval() {
@@ -330,6 +338,8 @@ export default class SyncRepPlugin extends Plugin {
 		const fileExplorers = this.getFileExplorers();
 
 		if (!fileExplorers.length) {
+			// Si aucun explorateur de fichiers n'est trouvé, réessayer plus tard
+			this.debugLog('Aucun explorateur de fichiers trouvé, nouvelle tentative programmée');
 			return;
 		}
 
